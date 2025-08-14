@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FPL Live Leaderboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>FPL Live Leaderboard</h1>
+            <div class="controls">
+                <button id="refreshBtn" class="refresh-btn">🔄 Refresh</button>
+                <span id="lastUpdated" class="timestamp">Last updated: Never</span>
+            </div>
+        </header>
+
+        <div class="setup-section" id="setupSection">
+            <h2>Setup</h2>
+            <p>Enter your FPL League ID to get started:</p>
+            <div class="input-group">
+                <input type="number" id="leagueIdInput" placeholder="Enter League ID" min="1">
+                <button id="loadLeagueBtn">Load League</button>
+            </div>
+            <p class="help-text">
+                <strong>How to find your League ID:</strong><br>
+                1. Log in to <a href="https://fantasy.premierleague.com/" target="_blank">fantasy.premierleague.com</a><br>
+                2. Go to "Leagues & Cups" tab<br>
+                3. Click on your league<br>
+                4. Copy the number from the URL
+            </p>
+        </div>
+
+        <div class="leaderboard-section" id="leaderboardSection" style="display: none;">
+            <div class="league-info">
+                <h2 id="leagueName">League Name</h2>
+                <p id="leagueDetails">League Details</p>
+            </div>
+
+            <div class="view-controls">
+                <button class="view-btn active" data-view="gameweek">Current Gameweek</button>
+                <button class="view-btn" data-view="monthly">Monthly Total</button>
+                <button class="view-btn" data-view="overall">Overall</button>
+            </div>
+
+            <div class="leaderboard-container">
+                <table id="leaderboardTable">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Manager</th>
+                            <th>Team Name</th>
+                            <th id="scoreHeader">Gameweek Points</th>
+                            <th>Total Points</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboardBody">
+                        <!-- Data will be populated here -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="loading" id="loadingIndicator" style="display: none;">
+                <div class="spinner"></div>
+                <p>Loading data...</p>
+            </div>
+
+            <div class="error" id="errorMessage" style="display: none;">
+                <p>Error loading data. Please try again.</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html> 
