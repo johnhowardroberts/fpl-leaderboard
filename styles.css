@@ -260,6 +260,19 @@ tr:hover {
     color: #3498db;
 }
 
+.join-date {
+    color: #7f8c8d;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.status {
+    color: #27ae60;
+    font-weight: 600;
+    text-align: center;
+    font-size: 0.9rem;
+}
+
 .loading {
     text-align: center;
     padding: 40px;

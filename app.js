@@ -123,20 +123,71 @@ class FPLLeaderboard {
 
     updateLeagueInfo(leagueData) {
         this.elements.leagueName.textContent = leagueData.league.name;
-        this.elements.leagueDetails.textContent = 
-            `${leagueData.standings.results.length} teams • Created by ${leagueData.league.entry_name}`;
+        
+        // Check if we're in pre-season (no standings yet)
+        const isPreSeason = leagueData.standings.results.length === 0;
+        const memberCount = leagueData.new_entries.results.length;
+        
+        if (isPreSeason) {
+            this.elements.leagueDetails.textContent = 
+                `${memberCount} teams • Season starts soon • Created by ${leagueData.league.entry_name}`;
+        } else {
+            this.elements.leagueDetails.textContent = 
+                `${leagueData.standings.results.length} teams • Created by ${leagueData.league.entry_name}`;
+        }
     }
 
     async updateLeaderboard(leagueData, currentEvent) {
-        const currentGameweek = currentEvent.status.find(s => s.status === 'a')?.event || 1;
+        const isPreSeason = leagueData.standings.results.length === 0;
         
-        // Get manager histories for monthly calculations
-        const managerHistories = await this.getManagerHistories(leagueData.standings.results);
+        if (isPreSeason) {
+            this.renderPreSeasonLeaderboard(leagueData);
+        } else {
+            const currentGameweek = currentEvent.status.find(s => s.status === 'a')?.event || 1;
+            
+            // Get manager histories for monthly calculations
+            const managerHistories = await this.getManagerHistories(leagueData.standings.results);
+            
+            // Calculate scores for different views
+            const scores = this.calculateScores(leagueData.standings.results, managerHistories, currentGameweek);
+            
+            this.renderLeaderboard(scores);
+        }
+    }
+
+    renderPreSeasonLeaderboard(leagueData) {
+        const members = leagueData.new_entries.results;
         
-        // Calculate scores for different views
-        const scores = this.calculateScores(leagueData.standings.results, managerHistories, currentGameweek);
+        // Sort by join date (most recent first)
+        const sortedMembers = [...members].sort((a, b) => 
+            new Date(b.joined_time) - new Date(a.joined_time)
+        );
         
-        this.renderLeaderboard(scores);
+        this.elements.leaderboardBody.innerHTML = '';
+        
+        sortedMembers.forEach((member, index) => {
+            const row = this.createPreSeasonRow(member, index + 1);
+            this.elements.leaderboardBody.appendChild(row);
+        });
+        
+        // Update headers for pre-season view
+        this.elements.scoreHeader.textContent = 'Join Date';
+        this.elements.viewButtons.forEach(btn => btn.style.display = 'none');
+    }
+
+    createPreSeasonRow(member, rank) {
+        const row = document.createElement('tr');
+        const joinDate = new Date(member.joined_time).toLocaleDateString();
+        
+        row.innerHTML = `
+            <td class="rank">${rank}</td>
+            <td class="manager-name">${member.player_first_name} ${member.player_last_name}</td>
+            <td class="team-name">${member.entry_name}</td>
+            <td class="join-date">${joinDate}</td>
+            <td class="status">Ready for Season</td>
+        `;
+        
+        return row;
     }
 
     async getManagerHistories(managers) {
@@ -202,6 +253,9 @@ class FPLLeaderboard {
             const row = this.createLeaderboardRow(manager, index + 1);
             this.elements.leaderboardBody.appendChild(row);
         });
+        
+        // Show view buttons for regular season
+        this.elements.viewButtons.forEach(btn => btn.style.display = 'inline-block');
     }
 
     sortScores(scores) {
