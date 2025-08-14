@@ -1,10 +1,11 @@
 class FPLLeaderboard {
     constructor() {
         this.leagueId = null;
-        this.currentView = 'gameweek';
+        this.currentView = 'monthly'; // Default to monthly view
         this.autoRefreshInterval = null;
         this.cache = new Map();
         this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
+        this.gameweekDates = new Map(); // Cache for gameweek to date mapping
         
         this.initializeElements();
         this.bindEvents();
@@ -80,28 +81,34 @@ class FPLLeaderboard {
     }
 
     async loadLeagueData() {
-        const [leagueData, currentEvent] = await Promise.all([
+        const [leagueData, currentEvent, fixtures] = await Promise.all([
             this.fetchLeagueStandings(),
-            this.fetchCurrentEvent()
+            this.fetchCurrentEvent(),
+            this.fetchFixtures()
         ]);
 
         this.updateLeagueInfo(leagueData);
-        await this.updateLeaderboard(leagueData, currentEvent);
+        await this.updateLeaderboard(leagueData, currentEvent, fixtures);
         this.updateTimestamp();
     }
 
     async fetchLeagueStandings() {
-        const url = `https://fantasy.premierleague.com/api/leagues-classic/${this.leagueId}/standings/`;
+        const url = `/api/leagues-classic/${this.leagueId}/standings/`;
         return await this.fetchWithCache(url, 'league_standings');
     }
 
     async fetchCurrentEvent() {
-        const url = 'https://fantasy.premierleague.com/api/event-status/';
+        const url = '/api/event-status/';
         return await this.fetchWithCache(url, 'event_status', 60000); // 1 minute cache
     }
 
+    async fetchFixtures() {
+        const url = '/api/fixtures/';
+        return await this.fetchWithCache(url, 'fixtures', 5 * 60 * 1000); // 5 minutes cache
+    }
+
     async fetchManagerHistory(managerId) {
-        const url = `https://fantasy.premierleague.com/api/entry/${managerId}/history/`;
+        const url = `/api/entry/${managerId}/history/`;
         return await this.fetchWithCache(url, `manager_${managerId}_history`);
     }
 
@@ -137,12 +144,15 @@ class FPLLeaderboard {
         }
     }
 
-    async updateLeaderboard(leagueData, currentEvent) {
+    async updateLeaderboard(leagueData, currentEvent, fixtures) {
         const isPreSeason = leagueData.standings.results.length === 0;
         
         if (isPreSeason) {
             this.renderPreSeasonLeaderboard(leagueData);
         } else {
+            // Build gameweek to date mapping
+            this.buildGameweekDateMapping(fixtures);
+            
             const currentGameweek = currentEvent.status.find(s => s.status === 'a')?.event || 1;
             
             // Get manager histories for monthly calculations
@@ -153,6 +163,22 @@ class FPLLeaderboard {
             
             this.renderLeaderboard(scores);
         }
+    }
+
+    buildGameweekDateMapping(fixtures) {
+        this.gameweekDates.clear();
+        
+        fixtures.forEach(fixture => {
+            if (fixture.event && fixture.kickoff_time) {
+                const gameweek = fixture.event;
+                const kickoffDate = new Date(fixture.kickoff_time);
+                
+                if (!this.gameweekDates.has(gameweek) || 
+                    kickoffDate < this.gameweekDates.get(gameweek)) {
+                    this.gameweekDates.set(gameweek, kickoffDate);
+                }
+            }
+        });
     }
 
     renderPreSeasonLeaderboard(leagueData) {
@@ -185,6 +211,7 @@ class FPLLeaderboard {
             <td class="team-name">${member.entry_name}</td>
             <td class="join-date">${joinDate}</td>
             <td class="status">Ready for Season</td>
+            <td class="status">Ready for Season</td>
         `;
         
         return row;
@@ -212,7 +239,7 @@ class FPLLeaderboard {
         return managers.map(manager => {
             const history = histories[manager.entry];
             const gameweekPoints = this.getGameweekPoints(history, currentGameweek);
-            const monthlyPoints = this.getMonthlyPoints(history, currentMonth, currentYear);
+            const monthlyPoints = this.getMonthlyPoints(history, currentMonth, currentYear, gameweekPoints);
             
             return {
                 ...manager,
@@ -230,21 +257,28 @@ class FPLLeaderboard {
         return gameweekData ? gameweekData.points : 0;
     }
 
-    getMonthlyPoints(history, month, year) {
-        if (!history || !history.current) return 0;
+    getMonthlyPoints(history, month, year, currentGameweekPoints) {
+        if (!history || !history.current) return currentGameweekPoints;
         
         let monthlyTotal = 0;
+        
+        // Sum points from all gameweeks in the current month
         history.current.forEach(gameweek => {
-            const gameweekDate = new Date(gameweek.event * 7 * 24 * 60 * 60 * 1000); // Rough estimate
-            if (gameweekDate.getMonth() === month && gameweekDate.getFullYear() === year) {
+            const gameweekDate = this.gameweekDates.get(gameweek.event);
+            
+            if (gameweekDate && 
+                gameweekDate.getMonth() === month && 
+                gameweekDate.getFullYear() === year) {
                 monthlyTotal += gameweek.points;
             }
         });
         
-        return monthlyTotal;
+        // Add current gameweek points (which might be live/partial)
+        return monthlyTotal + currentGameweekPoints;
     }
 
     renderLeaderboard(scores) {
+        // Always sort by monthly score (descending) as primary sort
         const sortedScores = this.sortScores(scores);
         
         this.elements.leaderboardBody.innerHTML = '';
@@ -259,53 +293,30 @@ class FPLLeaderboard {
     }
 
     sortScores(scores) {
-        const sortKey = this.getSortKey();
-        return [...scores].sort((a, b) => b[sortKey] - a[sortKey]);
-    }
-
-    getSortKey() {
-        switch (this.currentView) {
-            case 'gameweek': return 'gameweekPoints';
-            case 'monthly': return 'monthlyPoints';
-            case 'overall': return 'overallPoints';
-            default: return 'gameweekPoints';
-        }
+        // Always sort by monthly score first, then by overall score as tiebreaker
+        return [...scores].sort((a, b) => {
+            if (b.monthlyPoints !== a.monthlyPoints) {
+                return b.monthlyPoints - a.monthlyPoints;
+            }
+            return b.overallPoints - a.overallPoints;
+        });
     }
 
     createLeaderboardRow(manager, rank) {
         const row = document.createElement('tr');
         
         const rankClass = rank <= 3 ? `rank-${rank}` : '';
-        const points = this.getPointsForCurrentView(manager);
-        const pointsClass = this.getPointsClass();
         
         row.innerHTML = `
             <td class="rank ${rankClass}">${rank}</td>
             <td class="manager-name">${manager.player_first_name} ${manager.player_last_name}</td>
             <td class="team-name">${manager.entry_name}</td>
-            <td class="points ${pointsClass}">${points}</td>
+            <td class="points monthly-points">${manager.monthlyPoints}</td>
+            <td class="points gameweek-points">${manager.gameweekPoints}</td>
             <td class="points overall-points">${manager.overallPoints}</td>
         `;
         
         return row;
-    }
-
-    getPointsForCurrentView(manager) {
-        switch (this.currentView) {
-            case 'gameweek': return manager.gameweekPoints;
-            case 'monthly': return manager.monthlyPoints;
-            case 'overall': return manager.overallPoints;
-            default: return manager.gameweekPoints;
-        }
-    }
-
-    getPointsClass() {
-        switch (this.currentView) {
-            case 'gameweek': return 'gameweek-points';
-            case 'monthly': return 'monthly-points';
-            case 'overall': return 'overall-points';
-            default: return 'gameweek-points';
-        }
     }
 
     switchView(view) {
@@ -316,15 +327,15 @@ class FPLLeaderboard {
             btn.classList.toggle('active', btn.dataset.view === view);
         });
         
-        // Update header
+        // Update header based on current view
         const headers = {
-            gameweek: 'Gameweek Points',
-            monthly: 'Monthly Points',
-            overall: 'Overall Points'
+            monthly: 'Live Monthly Score',
+            gameweek: 'Live Gameweek Score',
+            overall: 'Overall Season'
         };
         this.elements.scoreHeader.textContent = headers[view];
         
-        // Re-render leaderboard
+        // Re-render leaderboard (still sorted by monthly score)
         if (this.leagueId) {
             this.refreshData();
         }

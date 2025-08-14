@@ -5,13 +5,19 @@ echo "📱 Open your browser to: http://localhost:8000"
 echo "🛑 Press Ctrl+C to stop the server"
 echo ""
 
-# Check if Python 3 is available
-if command -v python3 &> /dev/null; then
-    python3 -m http.server 8000
-elif command -v python &> /dev/null; then
-    python -m http.server 8000
+# Check if Node.js is available
+if command -v node &> /dev/null; then
+    # Check if dependencies are installed
+    if [ ! -d "node_modules" ]; then
+        echo "📦 Installing dependencies..."
+        npm install
+    fi
+    
+    # Start the server
+    npm start
 else
-    echo "❌ Error: Python is not installed or not in PATH"
-    echo "Please install Python 3 to run this server"
+    echo "❌ Error: Node.js is not installed or not in PATH"
+    echo "Please install Node.js to run this server"
+    echo "Download from: https://nodejs.org/"
     exit 1
 fi 
