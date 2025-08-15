@@ -353,4 +353,34 @@ tr:hover {
         padding: 8px 6px;
         font-size: 0.8rem;
     }
+}
+
+/* Month Controls Styling */
+.month-controls {
+    margin: 20px 0;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+}
+
+.month-controls label {
+    font-weight: 600;
+    color: #495057;
+    margin-right: 10px;
+}
+
+.month-controls select {
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background: white;
+    font-size: 14px;
+    min-width: 150px;
+}
+
+.month-controls select:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
 } 

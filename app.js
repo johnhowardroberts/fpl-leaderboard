@@ -2,6 +2,8 @@ class FPLLeaderboard {
     constructor() {
         this.leagueId = null;
         this.currentView = 'monthly'; // Default to monthly view
+        this.currentMonth = null;
+        this.availableMonths = [];
         this.autoRefreshInterval = null;
         this.cache = new Map();
         this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
@@ -27,7 +29,9 @@ class FPLLeaderboard {
             lastUpdated: document.getElementById('lastUpdated'),
             loadingIndicator: document.getElementById('loadingIndicator'),
             errorMessage: document.getElementById('errorMessage'),
-            viewButtons: document.querySelectorAll('.view-btn')
+            viewButtons: document.querySelectorAll('.view-btn'),
+            monthControls: document.getElementById('monthControls'),
+            monthFilter: document.getElementById('monthFilter')
         };
     }
 
@@ -43,6 +47,10 @@ class FPLLeaderboard {
             btn.addEventListener('click', (e) => {
                 this.switchView(e.target.dataset.view);
             });
+        });
+
+        this.elements.monthFilter.addEventListener('change', (e) => {
+            this.switchMonth(e.target.value);
         });
 
         // Auto-refresh every 2 minutes
@@ -152,6 +160,7 @@ class FPLLeaderboard {
         } else {
             // Build gameweek to date mapping
             this.buildGameweekDateMapping(fixtures);
+            this.buildAvailableMonths(); // Call the new method here
             
             const currentGameweek = currentEvent.status.find(s => s.status === 'a')?.event || 1;
             
@@ -181,6 +190,53 @@ class FPLLeaderboard {
         });
     }
 
+    buildAvailableMonths() {
+        const months = new Set();
+        const currentDate = new Date();
+        const currentMonth = currentDate.getMonth();
+        const currentYear = currentDate.getFullYear();
+        
+        // Add current month
+        months.add(`${currentYear}-${currentMonth}`);
+        
+        // Add all months that have gameweeks
+        this.gameweekDates.forEach((date, gameweek) => {
+            const month = date.getMonth();
+            const year = date.getFullYear();
+            months.add(`${year}-${month}`);
+        });
+        
+        this.availableMonths = Array.from(months).sort();
+        
+        // Set current month as default
+        this.currentMonth = `${currentYear}-${currentMonth}`;
+        
+        this.populateMonthFilter();
+    }
+
+    populateMonthFilter() {
+        const monthFilter = this.elements.monthFilter;
+        monthFilter.innerHTML = '';
+        
+        this.availableMonths.forEach(monthKey => {
+            const [year, month] = monthKey.split('-');
+            const monthName = new Date(parseInt(year), parseInt(month)).toLocaleDateString('en-US', { 
+                month: 'long', 
+                year: 'numeric' 
+            });
+            
+            const option = document.createElement('option');
+            option.value = monthKey;
+            option.textContent = monthName;
+            option.selected = monthKey === this.currentMonth;
+            
+            monthFilter.appendChild(option);
+        });
+        
+        // Show month controls only if we have multiple months
+        this.elements.monthControls.style.display = this.availableMonths.length > 1 ? 'block' : 'none';
+    }
+
     renderPreSeasonLeaderboard(leagueData) {
         const members = leagueData.new_entries.results;
         
@@ -207,10 +263,9 @@ class FPLLeaderboard {
         
         row.innerHTML = `
             <td class="rank">${rank}</td>
-            <td class="manager-name">${member.player_first_name} ${member.player_last_name}</td>
+            <td class="manager-name">${member.player_name || 'Unknown Manager'}</td>
             <td class="team-name">${member.entry_name}</td>
             <td class="join-date">${joinDate}</td>
-            <td class="status">Ready for Season</td>
             <td class="status">Ready for Season</td>
         `;
         
@@ -233,13 +288,12 @@ class FPLLeaderboard {
     }
 
     calculateScores(managers, histories, currentGameweek) {
-        const currentMonth = new Date().getMonth();
-        const currentYear = new Date().getFullYear();
+        const [selectedYear, selectedMonth] = this.currentMonth.split('-').map(Number);
         
         return managers.map(manager => {
             const history = histories[manager.entry];
             const gameweekPoints = this.getGameweekPoints(history, currentGameweek);
-            const monthlyPoints = this.getMonthlyPoints(history, currentMonth, currentYear, gameweekPoints);
+            const monthlyPoints = this.getMonthlyPoints(history, selectedMonth, selectedYear, gameweekPoints);
             
             return {
                 ...manager,
@@ -258,11 +312,13 @@ class FPLLeaderboard {
     }
 
     getMonthlyPoints(history, month, year, currentGameweekPoints) {
-        if (!history || !history.current) return currentGameweekPoints;
+        if (!history || !history.current) return 0;
         
         let monthlyTotal = 0;
+        const currentDate = new Date();
+        const isCurrentMonth = month === currentDate.getMonth() && year === currentDate.getFullYear();
         
-        // Sum points from all gameweeks in the current month
+        // Sum points from all gameweeks in the selected month
         history.current.forEach(gameweek => {
             const gameweekDate = this.gameweekDates.get(gameweek.event);
             
@@ -273,8 +329,9 @@ class FPLLeaderboard {
             }
         });
         
-        // Add current gameweek points (which might be live/partial)
-        return monthlyTotal + currentGameweekPoints;
+        // For current month, we might have live/partial gameweek data
+        // For past months, we only use completed gameweek data
+        return monthlyTotal;
     }
 
     renderLeaderboard(scores) {
@@ -293,12 +350,12 @@ class FPLLeaderboard {
     }
 
     sortScores(scores) {
-        // Always sort by monthly score first, then by overall score as tiebreaker
+        // Always sort by monthly score first, then by gameweek score as tiebreaker
         return [...scores].sort((a, b) => {
             if (b.monthlyPoints !== a.monthlyPoints) {
                 return b.monthlyPoints - a.monthlyPoints;
             }
-            return b.overallPoints - a.overallPoints;
+            return b.gameweekPoints - a.gameweekPoints;
         });
     }
 
@@ -309,11 +366,10 @@ class FPLLeaderboard {
         
         row.innerHTML = `
             <td class="rank ${rankClass}">${rank}</td>
-            <td class="manager-name">${manager.player_first_name} ${manager.player_last_name}</td>
+            <td class="manager-name">${manager.player_name || 'Unknown Manager'}</td>
             <td class="team-name">${manager.entry_name}</td>
-            <td class="points monthly-points">${manager.monthlyPoints}</td>
             <td class="points gameweek-points">${manager.gameweekPoints}</td>
-            <td class="points overall-points">${manager.overallPoints}</td>
+            <td class="points monthly-points">${manager.monthlyPoints}</td>
         `;
         
         return row;
@@ -328,14 +384,22 @@ class FPLLeaderboard {
         });
         
         // Update header based on current view
-        const headers = {
+        const viewLabels = {
             monthly: 'Live Monthly Score',
-            gameweek: 'Live Gameweek Score',
-            overall: 'Overall Season'
+            gameweek: 'Live Gameweek Score'
         };
-        this.elements.scoreHeader.textContent = headers[view];
+        this.elements.scoreHeader.textContent = viewLabels[view];
         
         // Re-render leaderboard (still sorted by monthly score)
+        if (this.leagueId) {
+            this.refreshData();
+        }
+    }
+
+    switchMonth(monthKey) {
+        this.currentMonth = monthKey;
+        
+        // Re-render leaderboard with new month filter
         if (this.leagueId) {
             this.refreshData();
         }

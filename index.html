@@ -41,7 +41,13 @@
             <div class="view-controls">
                 <button class="view-btn active" data-view="monthly">Live Monthly Score</button>
                 <button class="view-btn" data-view="gameweek">Live Gameweek Score</button>
-                <button class="view-btn" data-view="overall">Overall Season</button>
+            </div>
+
+            <div class="month-controls" id="monthControls" style="display: none;">
+                <label for="monthFilter">Filter by Month:</label>
+                <select id="monthFilter">
+                    <option value="">Loading months...</option>
+                </select>
             </div>
 
             <div class="leaderboard-container">
@@ -51,9 +57,8 @@
                             <th>Rank</th>
                             <th>Manager</th>
                             <th>Team Name</th>
-                            <th id="scoreHeader">Live Monthly Score</th>
                             <th>Live Gameweek Score</th>
-                            <th>Overall Season</th>
+                            <th id="scoreHeader">Live Monthly Score</th>
                         </tr>
                     </thead>
                     <tbody id="leaderboardBody">
