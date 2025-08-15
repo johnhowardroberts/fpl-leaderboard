@@ -120,6 +120,21 @@ class FPLLeaderboard {
         return await this.fetchWithCache(url, `manager_${managerId}_history`);
     }
 
+    async fetchManagerTeam(managerId, currentGameweek) {
+        const url = `/api/entry/${managerId}/event/${currentGameweek}/picks/`;
+        return await this.fetchWithCache(url, `manager_${managerId}_team_${currentGameweek}`, 60000); // 1 minute cache
+    }
+
+    async fetchLiveGameData(currentGameweek) {
+        const url = `/api/event/${currentGameweek}/live/`;
+        return await this.fetchWithCache(url, `live_game_${currentGameweek}`, 30000); // 30 second cache for live data
+    }
+
+    async fetchPlayerData() {
+        const url = '/api/bootstrap-static/';
+        return await this.fetchWithCache(url, 'bootstrap_static', 5 * 60 * 1000); // 5 minutes cache
+    }
+
     async fetchWithCache(url, key, timeout = this.cacheTimeout) {
         const cached = this.cache.get(key);
         if (cached && Date.now() - cached.timestamp < timeout) {
@@ -167,8 +182,17 @@ class FPLLeaderboard {
             // Get manager histories for monthly calculations
             const managerHistories = await this.getManagerHistories(leagueData.standings.results);
             
+            // Get manager teams to calculate played players
+            const managerTeams = await this.getManagerTeams(leagueData.standings.results, currentGameweek);
+            
+            // Get live game data to see which players have played
+            const liveGameData = await this.fetchLiveGameData(currentGameweek);
+
+            // Get player data to map IDs to names
+            const playerData = await this.fetchPlayerData();
+
             // Calculate scores for different views
-            const scores = this.calculateScores(leagueData.standings.results, managerHistories, currentGameweek);
+            const scores = this.calculateScores(leagueData.standings.results, managerHistories, managerTeams, liveGameData, playerData, currentGameweek);
             
             this.renderLeaderboard(scores);
         }
@@ -267,6 +291,8 @@ class FPLLeaderboard {
             <td class="team-name">${member.entry_name}</td>
             <td class="join-date">${joinDate}</td>
             <td class="status">Ready for Season</td>
+            <td class="played-players">-</td>
+            <td class="captain">-</td>
         `;
         
         return row;
@@ -287,11 +313,106 @@ class FPLLeaderboard {
         return histories;
     }
 
-    calculateScores(managers, histories, currentGameweek) {
+    async getManagerTeams(managers, currentGameweek) {
+        const teams = {};
+        const promises = managers.map(async (manager) => {
+            try {
+                const team = await this.fetchManagerTeam(manager.entry, currentGameweek);
+                teams[manager.entry] = team;
+            } catch (error) {
+                console.warn(`Failed to fetch team for manager ${manager.entry}:`, error);
+            }
+        });
+        
+        await Promise.all(promises);
+        return teams;
+    }
+
+    calculatePlayedPlayers(team, liveGameData, currentGameweek) {
+        if (!team || !team.picks || !liveGameData) return 0;
+        
+        console.log('Team data:', team);
+        console.log('Live game data:', liveGameData);
+        
+        let playedCount = 0;
+        
+        // Count ALL 15 players in the squad (including bench) for testing
+        const allPicks = team.picks;
+        
+        console.log('All picks (15 players):', allPicks);
+        console.log('All picks with multipliers:', allPicks.map(p => ({ id: p.element, multiplier: p.multiplier, is_captain: p.is_captain })));
+        
+        allPicks.forEach((pick, index) => {
+            console.log(`Pick ${index}:`, pick);
+            
+            // Check if this player has played using live game data
+            const playerId = pick.element;
+            const playerLiveData = liveGameData.elements && liveGameData.elements[playerId];
+            
+            console.log(`Player ${playerId} live data:`, playerLiveData);
+            
+            // Player has played if they have minutes or points in live data
+            const hasMinutes = playerLiveData && playerLiveData.stats && playerLiveData.stats.minutes !== null && playerLiveData.stats.minutes > 0;
+            const hasPoints = playerLiveData && playerLiveData.stats && playerLiveData.stats.total_points !== null && playerLiveData.stats.total_points > 0;
+            
+            console.log(`Player ${playerId} - hasMinutes: ${hasMinutes}, hasPoints: ${hasPoints}`);
+            
+            const hasPlayed = hasMinutes || hasPoints;
+            
+            console.log(`Player ${playerId} has played: ${hasPlayed}`);
+            
+            if (hasPlayed) {
+                playedCount++;
+                console.log(`Player ${playerId} counted as played! Total so far: ${playedCount}`);
+            }
+        });
+        
+        console.log('Final played count:', playedCount);
+        return playedCount;
+    }
+
+    getCaptainInfo(team, liveGameData, playerData) {
+        if (!team || !team.picks || !liveGameData) return { name: 'Unknown', hasPlayed: false };
+        
+        // Find the captain (highest multiplier)
+        const captain = team.picks.find(pick => pick.is_captain === true) || 
+                       team.picks.reduce((max, pick) => pick.multiplier > max.multiplier ? pick : max);
+        
+        if (!captain) return { name: 'Unknown', hasPlayed: false };
+        
+        // Get captain's live data
+        const playerId = captain.element;
+        const playerLiveData = liveGameData.elements && liveGameData.elements[playerId];
+        
+        // Check if captain has played
+        const hasPlayed = playerLiveData && (
+            (playerLiveData.stats && playerLiveData.stats.minutes !== null && playerLiveData.stats.minutes > 0) ||
+            (playerLiveData.stats && playerLiveData.stats.total_points !== null && playerLiveData.stats.total_points > 0)
+        );
+        
+        // Get captain's name from player data
+        let captainName = 'Unknown';
+        if (playerData && playerData.elements) {
+            const player = playerData.elements.find(p => p.id === playerId);
+            if (player) {
+                captainName = player.web_name || player.first_name + ' ' + player.second_name || 'Unknown';
+            }
+        }
+        
+        return {
+            name: captainName,
+            hasPlayed: hasPlayed
+        };
+    }
+
+    calculateScores(managers, histories, managerTeams, liveGameData, playerData, currentGameweek) {
         const [selectedYear, selectedMonth] = this.currentMonth.split('-').map(Number);
         
         return managers.map(manager => {
             const history = histories[manager.entry];
+            const team = managerTeams[manager.entry];
+            const playedPlayers = this.calculatePlayedPlayers(team, liveGameData, currentGameweek);
+            const captainInfo = this.getCaptainInfo(team, liveGameData, playerData);
             const gameweekPoints = this.getGameweekPoints(history, currentGameweek);
             const monthlyPoints = this.getMonthlyPoints(history, selectedMonth, selectedYear, gameweekPoints);
             
@@ -299,7 +420,9 @@ class FPLLeaderboard {
                 ...manager,
                 gameweekPoints,
                 monthlyPoints,
-                overallPoints: manager.total
+                overallPoints: manager.total,
+                playedPlayers: playedPlayers,
+                captainInfo: captainInfo
             };
         });
     }
@@ -370,6 +493,8 @@ class FPLLeaderboard {
             <td class="team-name">${manager.entry_name}</td>
             <td class="points gameweek-points">${manager.gameweekPoints}</td>
             <td class="points monthly-points">${manager.monthlyPoints}</td>
+            <td class="played-players">${manager.playedPlayers}/15</td>
+            <td class="captain">${manager.captainInfo.name} ${manager.captainInfo.hasPlayed ? '✅' : '⏳'}</td>
         `;
         
         return row;

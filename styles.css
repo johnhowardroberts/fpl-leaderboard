@@ -384,3 +384,25 @@ tr:hover {
     border-color: #007bff;
     box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
 } 
+
+.played-players {
+    text-align: center;
+    font-weight: 600;
+    color: #495057;
+}
+
+.played-players:empty::before {
+    content: "-";
+    color: #6c757d;
+}
+
+.captain {
+    text-align: center;
+    font-weight: 600;
+    color: #495057;
+}
+
+.captain:empty::before {
+    content: "-";
+    color: #6c757d;
+} 
